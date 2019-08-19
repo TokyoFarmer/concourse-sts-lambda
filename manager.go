@@ -14,6 +14,8 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3/s3iface"
 	"github.com/aws/aws-sdk-go/service/secretsmanager"
 	"github.com/aws/aws-sdk-go/service/secretsmanager/secretsmanageriface"
+	"github.com/aws/aws-sdk-go/service/ssm"
+	"github.com/aws/aws-sdk-go/service/ssm/ssmiface"
 	"github.com/aws/aws-sdk-go/service/sts"
 	"github.com/aws/aws-sdk-go/service/sts/stsiface"
 )
@@ -21,6 +23,9 @@ import (
 // SecretsClient for testing purposes.
 //go:generate mockgen -destination=mocks/mock_secrets_client.go -package=mocks github.com/telia-oss/concourse-sts-lambda SecretsClient
 type SecretsClient secretsmanageriface.SecretsManagerAPI
+
+// SSMClient : TODO:  mock and tests
+type SSMClient ssmiface.SSMAPI
 
 // STSClient for testing purposes.
 //go:generate mockgen -destination=mocks/mock_sts_client.go -package=mocks github.com/telia-oss/concourse-sts-lambda STSClient
@@ -33,6 +38,7 @@ type S3Client s3iface.S3API
 // Manager handles API calls to AWS.
 type Manager struct {
 	secretsClient SecretsClient
+	ssmClient     SSMClient
 	stsClient     STSClient
 	s3Client      S3Client
 }
@@ -42,6 +48,7 @@ func NewManager(sess *session.Session) *Manager {
 	return &Manager{
 		stsClient:     sts.New(sess),
 		secretsClient: secretsmanager.New(sess),
+		ssmClient:     ssm.New(sess),
 		s3Client:      s3.New(sess),
 	}
 }
@@ -93,8 +100,8 @@ func (m *Manager) AssumeRole(arn, team string, duration int64) (*sts.Credentials
 	return out.Credentials, nil
 }
 
-// WriteCredentials handles writing a set of Credentials to the parameter store.
-func (m *Manager) WriteCredentials(creds *sts.Credentials, path string) error {
+// WriteCredentialsSecretsManager handles writing a set of Credentials to the secrets manager.
+func (m *Manager) WriteCredentialsSecretsManager(creds *sts.Credentials, path string) error {
 	values := map[string]string{
 		path + "-access-key":    aws.StringValue(creds.AccessKeyId),
 		path + "-secret-key":    aws.StringValue(creds.SecretAccessKey),
@@ -102,7 +109,7 @@ func (m *Manager) WriteCredentials(creds *sts.Credentials, path string) error {
 	}
 
 	for name, value := range values {
-		err := m.writeSecret(name, value)
+		err := m.writeSecretSecretsManager(name, value)
 		if err != nil {
 			return err
 		}
@@ -110,7 +117,7 @@ func (m *Manager) WriteCredentials(creds *sts.Credentials, path string) error {
 	return nil
 }
 
-func (m *Manager) writeSecret(name, secret string) error {
+func (m *Manager) writeSecretSecretsManager(name, secret string) error {
 	var err error
 	// Fewer API calls to naively try to create it and handle the error.
 	_, err = m.secretsClient.CreateSecret(&secretsmanager.CreateSecretInput{
@@ -134,5 +141,35 @@ func (m *Manager) writeSecret(name, secret string) error {
 		SecretId:     aws.String(name),
 		SecretString: aws.String(secret),
 	})
+	return err
+}
+
+// WriteCredentialsParameterStore handles writing a set of Credentials to the parameter store.
+func (m *Manager) WriteCredentialsParameterStore(creds *sts.Credentials, path string) error {
+	values := map[string]string{
+		path + "-access-key":    aws.StringValue(creds.AccessKeyId),
+		path + "-secret-key":    aws.StringValue(creds.SecretAccessKey),
+		path + "-session-token": aws.StringValue(creds.SessionToken),
+	}
+
+	for name, value := range values {
+		err := m.writeSecretParameterStore(name, value)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *Manager) writeSecretParameterStore(name, secret string) error {
+	var err error
+	_, err = m.ssmClient.PutParameter(&ssm.PutParameterInput{
+		Name:        aws.String(name),
+		Value:       aws.String(secret),
+		Type:        aws.String("SecureString"),
+		Description: aws.String("Parameter managed by concourse-sts-lambda"),
+		Overwrite:   aws.Bool(true),
+	})
+
 	return err
 }

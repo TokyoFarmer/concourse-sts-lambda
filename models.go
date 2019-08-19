@@ -15,6 +15,8 @@ type Configuration struct {
 type Team struct {
 	Name     string     `json:"name"`
 	Accounts []*Account `json:"accounts"`
+	// TODO make enum "parameter-store" | "secrets-manager"
+	ParameterType string `json:"parameterType"`
 }
 
 // Account represents the configuration for an assumable role.
@@ -31,6 +33,13 @@ type SecretPath struct {
 	Template string
 }
 
+// ParameterStorePath represents the path used to write secrets into Secrets manager.
+type ParameterStorePath struct {
+	Team     string
+	Account  string
+	Template string
+}
+
 // NewSecretPath ...
 func NewSecretPath(team, account, template string) *SecretPath {
 	return &SecretPath{
@@ -40,7 +49,28 @@ func NewSecretPath(team, account, template string) *SecretPath {
 	}
 }
 
+// NewParameterStorePath ...
+func NewParameterStorePath(team, account, template string) *ParameterStorePath {
+	return &ParameterStorePath{
+		Team:     team,
+		Account:  account,
+		Template: template,
+	}
+}
+
 func (p *SecretPath) String() (string, error) {
+	t, err := template.New("path").Option("missingkey=error").Parse(p.Template)
+	if err != nil {
+		return "", err
+	}
+	var s strings.Builder
+	if err = t.Execute(&s, p); err != nil {
+		return "", err
+	}
+	return s.String(), nil
+}
+
+func (p *ParameterStorePath) String() (string, error) {
 	t, err := template.New("path").Option("missingkey=error").Parse(p.Template)
 	if err != nil {
 		return "", err
