@@ -163,11 +163,12 @@ func (m *Manager) WriteCredentialsParameterStore(creds *sts.Credentials, path st
 
 func (m *Manager) writeSecretParameterStore(name, secret string) error {
 	var err error
+	timestamp := time.Now().Format(time.RFC3339)
 	_, err = m.ssmClient.PutParameter(&ssm.PutParameterInput{
 		Name:        aws.String(name),
 		Value:       aws.String(secret),
 		Type:        aws.String("SecureString"),
-		Description: aws.String("Parameter managed by concourse-sts-lambda"),
+		Description: aws.String(fmt.Sprintf("STS Credentials for Concourse. Last updated: %s", timestamp)),
 		Overwrite:   aws.Bool(true),
 	})
 
